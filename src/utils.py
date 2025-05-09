@@ -8,7 +8,7 @@ import re
 import shutil
 import sys
 import time
-from argparse import Namespace, ArgumentParser
+from argparse import ArgumentParser, Namespace
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -22,7 +22,7 @@ import yaml
 from apprise import Apprise
 from ipapi import ipapi
 from ipapi.exceptions import RateLimited
-from requests import Session, JSONDecodeError
+from requests import JSONDecodeError, Session
 from requests.adapters import HTTPAdapter
 from selenium.common import (
     ElementClickInterceptedException,
@@ -213,6 +213,18 @@ class Utils:
             locale = pylocale.getlocale()[0]
             pylocale.setlocale(pylocale.LC_NUMERIC, locale)
 
+    def _getUserGoal(self) -> dict:
+        """
+        Retrieve the user goal data either from Bing info or Dashboard data,
+        depending on the preference.
+        """
+        if PREFER_BING_INFO:
+            user_goal = self.getBingInfo().get("flyoutResult", {}).get("userGoal")
+            if user_goal is not None:
+                return user_goal
+        user_status = self.getDashboardData().get("userStatus", {})
+        return user_status.get("redeemGoal")
+
     def waitUntilVisible(
         self, by: str, selector: str, timeToWait: float = 10
     ) -> WebElement:
@@ -325,14 +337,18 @@ class Utils:
         return self.getDashboardData()["userStatus"]["availablePoints"]
 
     def getGoalPoints(self) -> int:
-        if PREFER_BING_INFO:
-            return self.getBingInfo()["flyoutResult"]["userGoal"]["price"]
-        return self.getDashboardData()["userStatus"]["redeemGoal"]["price"]
+        user_goal = self._getUserGoal()
+        if user_goal:
+            return user_goal.get("price", 0)
+        logging.debug("No user goal found")
+        return 0
 
     def getGoalTitle(self) -> str:
-        if PREFER_BING_INFO:
-            return self.getBingInfo()["flyoutResult"]["userGoal"]["title"]
-        return self.getDashboardData()["userStatus"]["redeemGoal"]["title"]
+        user_goal = self._getUserGoal()
+        if user_goal:
+            return user_goal.get("title", "")
+        logging.debug("No user goal found")
+        return ""
 
     def tryDismissAllMessages(self) -> None:
         byValues = [
@@ -830,8 +846,11 @@ def load_localized_activities(language: str) -> ModuleType:
         search_module = importlib.import_module(f"localized_activities.{language}")
         return search_module
     except ModuleNotFoundError:
-        logging.warning(f"No search queries found for language: {language}, defaulting to English (en)")
+        logging.warning(
+            f"No search queries found for language: {language}, defaulting to English (en)"
+        )
         return importlib.import_module("localized_activities.en")
+
 
 CONFIG = loadConfig()
 APPRISE = initApprise()
